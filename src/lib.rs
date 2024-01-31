@@ -10,4 +10,7 @@
 //! for ease-of-use.
 
 pub mod mas;
+pub mod graphs;
+pub mod dynamics;
+pub mod integrator;
 pub use mas::*;
