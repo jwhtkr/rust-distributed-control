@@ -1,16 +1,18 @@
 //! This module contains the primary structs, types, and traits
-//! for use in defining and analyzing a MAS.
+//! for use in defining and analyzing a Multi-agent System (MAS).
 
 use ndarray::LinalgScalar;
 
 use crate::dynamics::{compact_dynamics, Dynamics, MasDynamics};
 
+/// A homogenous MAS, i.e., the dynamics of each agent are identical.
 pub struct HomMas<'a, T: LinalgScalar> {
     hom_dynamics: &'a dyn Dynamics<T>,
     n_agents: usize,
 }
 
 impl<'a, T: LinalgScalar> HomMas<'a, T> {
+    /// create a new homogenous MAS with the given dynamics and number of agents.
     pub fn new(hom_dynamics: &dyn Dynamics<T>, n_agents: usize) -> HomMas<T> {
         HomMas {
             hom_dynamics,
@@ -27,7 +29,7 @@ impl<'a, T: LinalgScalar> MasDynamics<T> for HomMas<'a, T> {
             Err("The agent index exceeds the number of agents.")
         }
     }
-    fn n_agents(self: &Self) -> usize {
+    fn n_agents(&self) -> usize {
         self.n_agents
     }
 }

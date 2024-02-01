@@ -9,8 +9,11 @@ use ndarray::{s, Array1, Array2, LinalgScalar};
 /// downstream users to implement any dynamics that are desired,
 /// but this crate focuses on Linear time-invariant dynamics.
 pub trait Dynamics<T: LinalgScalar> {
+    /// Calculate the dynamics, i.e., $\dot{x} = f(t, x, u(t, x))$
     fn dynamics(self: &Self, t: T, x: &Array1<T>, u: &Array1<T>) -> Array1<T>;
+    /// Get the dimension of the state $x$.
     fn n_state(self: &Self) -> usize;
+    /// Get the dimension of the input $u$.
     fn n_input(self: &Self) -> usize;
 }
 
@@ -64,7 +67,6 @@ pub fn compact_dynamics<T: LinalgScalar>(mas_dynamics: &dyn MasDynamics<T>, t: T
     return x_next;
 }
 
-#[derive(Debug)]
 /// Implement linear, time-invariant (LTI) dynamics. I.e.,
 /// $\dot{x} = A x + B u$.
 ///
@@ -78,6 +80,7 @@ pub fn compact_dynamics<T: LinalgScalar>(mas_dynamics: &dyn MasDynamics<T>, t: T
 /// assert_eq!(dynamics.n_input(), 1);
 /// assert_eq!(dynamics.n_state(), 2);
 /// ```
+#[derive(Debug)]
 pub struct LtiDynamics<T: LinalgScalar> {
     a_mat: Array2<T>,
     b_mat: Array2<T>,

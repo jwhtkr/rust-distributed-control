@@ -60,6 +60,7 @@ where
     ))
 }
 
+/// Get the weight for the edge connecting the node at index `a` to the node at index `b`.
 fn get_edge_weight<N, E: LinalgScalar, Ty: EdgeType>(
     graph: &Graph<N, E, Ty>,
     a: usize,

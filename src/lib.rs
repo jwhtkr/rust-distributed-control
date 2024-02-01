@@ -11,8 +11,8 @@
 //!
 //! Example:
 //! ```
-//! use dc::integrator::Integrator;
 //! use distributed_control as dc;
+//! use dc::integrator::Integrator;
 //! use ndarray::{array, Array1};
 //!
 //! let lin_dyn = dc::LtiDynamics::new(array![[0.]], array![[1.]]);
