@@ -6,7 +6,7 @@ authors = ["Justin Whitaker <justinwhtkr@gmail.com>"]
 categories = ["mathematics", "science::robotics"]
 description = "Create, analyze and simulate multi-agent, distributed control systems"
 keywords = ["control", "distributed", "multi-agent"]
-license = "MIT or Apache-2.0"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/molasses11/rust-distributed-control"
 include = ["/src/**", "/Cargo.toml", "/LICENSE", "README.md"]
 
