@@ -1,4 +1,4 @@
-# rust-distributed-control
+# distributed_control
 Model, analyze and simulate multi-agent, distributed dynamic systems.
 
 ## Overview
