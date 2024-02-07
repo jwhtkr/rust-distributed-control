@@ -1,5 +1,5 @@
-use dc::integrator::Integrator;
 use distributed_control as dc;
+use dc::integrator::Integrator;
 use ndarray::{array, Array1};
 
 fn main() {

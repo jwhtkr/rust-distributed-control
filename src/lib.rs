@@ -9,7 +9,7 @@
 //! most commonly used functionality is re-exported to the top level
 //! for ease-of-use.
 //!
-//! Example:
+//! Examples:
 //! ```
 //! use distributed_control as dc;
 //! use dc::integrator::Integrator;
@@ -35,6 +35,7 @@ pub mod mas;
 pub mod graphs;
 pub mod dynamics;
 pub mod integrator;
+pub mod control_laws;
 pub use mas::*;
 pub use dynamics::LtiDynamics;
 pub use integrator::EulerIntegration;
