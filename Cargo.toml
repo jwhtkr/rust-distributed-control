@@ -21,5 +21,8 @@ petgraph = "0.6.4"
 [dev-dependencies]
 ndarray-linalg = {version = "0.16.0", features = ["openblas-system"]}
 
+[features]
+openblas-system = ["ndarray-linalg/openblas-system"]
+
 [package.metadata.docs.rs]
 rustdoc-args = ["--html-in-header", "katex_header.html"]
