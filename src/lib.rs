@@ -36,6 +36,7 @@ pub mod graphs;
 pub mod dynamics;
 pub mod integrator;
 pub mod control_laws;
+pub mod control_theory;
 pub use mas::*;
 pub use dynamics::LtiDynamics;
 pub use integrator::EulerIntegration;

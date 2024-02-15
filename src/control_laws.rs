@@ -1,7 +1,10 @@
 //! Define common/useful distributed control laws for easy use
 //! as feedback control for distributed systems.
 
-use ndarray::{linalg::kron, Array1, Array2, LinalgScalar};
+use std::ops::Mul;
+
+use ndarray::{linalg::kron, Array1, Array2, LinalgScalar, ScalarOperand};
+use ndarray_linalg::{error::LinalgError, Lapack, SVD};
 
 /// Create the consensus feedback control law for homogenous single-integrators.
 ///
@@ -32,7 +35,43 @@ pub fn single_integrator_consensus<T: LinalgScalar>(
     n_states: usize,
 ) -> impl Fn(T, &Array1<T>) -> Array1<T> {
     let feedback_mat = kron(&neg_laplacian, &Array2::eye(n_states));
-    return move |_t: T, x: &Array1<T>| -> Array1<T> { feedback_mat.dot(x) };
+    move |_t: T, x: &Array1<T>| -> Array1<T> { feedback_mat.dot(x) }
+}
+
+/// Create the leaderless synchronizing controller for a homogenous MAS
+///
+/// Formed from the negative of the graph Laplacian, a coupling gain (which
+/// helps stabilize the communication dynamics), and the feedback gain matrix
+/// (which stabilizes the dynamics). Equivalent to
+/// $$
+///     u(t,x) = - c (L \otimes K) x
+/// $$
+/// where $c$ is the coupling gain, $K$ the feedback gain matrix, $L$ is the
+/// Laplacian, and $\otimes$ denotes the Kronecker product.
+pub fn homogenous_leaderless_synchronization<T: LinalgScalar + ScalarOperand>(
+    neg_laplacian: &Array2<T>,
+    coupling_gain: T,
+    feedback_gain: &Array2<T>,
+) -> impl Fn(T, &Array1<T>) -> Array1<T> {
+    let feedback_mat = kron(&neg_laplacian.mul(coupling_gain), feedback_gain);
+    move |_t: T, x: &Array1<T>| -> Array1<T> { feedback_mat.dot(x) }
+}
+
+/// Determine the coupling gain that corresponds to a graph Laplacian matrix.
+///
+/// Computed as
+/// $$
+///     c = \frac{1}{2\operatorname{Re}(\lambda_2(L))}
+/// $$
+pub fn coupling_gain<T: LinalgScalar + Lapack<Real = T> + std::cmp::PartialOrd>(
+    laplacian: &Array2<T>,
+) -> Result<T, LinalgError> {
+    let (_, eig, _) = SVD::svd(laplacian, false, false)?;
+    let nonzero = eig.iter().map(|&v| v.re()).filter(|&v| T::from_f64(1e-12).unwrap() < v);
+    let min_nonzero = nonzero
+        .reduce(|v1, v2| if v1 <= v2 { v1 } else { v2 })
+        .unwrap();
+    Ok(T::one() / T::from_f64(2.0).unwrap() / min_nonzero)
 }
 
 #[cfg(test)]
@@ -41,6 +80,7 @@ mod tests {
 
     use super::*;
     use crate::{
+        control_theory::{care_iterative, k_from_p},
         integrator::{EulerIntegration, Integrator},
         HomMas, LtiDynamics,
     };
@@ -56,5 +96,35 @@ mod tests {
 
         let k = kron(&-&laplacian, &Array2::eye(2));
         assert_eq!(step_state, k.dot(&x0) + &x0);
+    }
+
+    #[test]
+    fn test_hom_leaderless_synch() {
+        let laplacian = array![[1., -1., 0.], [-1., 2., -1.], [0., -1., 1.]];
+        let a_mat = array![[0., 1.], [0., 0.]];
+        let b_mat = array![[0.], [1.]];
+        let dynamics = LtiDynamics::new(a_mat.clone(), b_mat.clone());
+        let mas = HomMas::new(&dynamics, 3);
+        let x0 = array![-1., 0., 0., 0., 2., 2.];
+        let q_mat = Array2::eye(2);
+        let r_mat = Array2::eye(1);
+        let k_mat = k_from_p(
+            &b_mat,
+            &r_mat,
+            &care_iterative(
+                &a_mat,
+                &b_mat,
+                &q_mat,
+                &r_mat,
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            ).unwrap(),
+        ).unwrap();
+        let c = coupling_gain(&laplacian).unwrap();
+        let control = homogenous_leaderless_synchronization(&-laplacian, c, &k_mat);
+        let state_step = EulerIntegration::step(0.0, 1.0, &x0, &mas, &control);
+
+        assert!(state_step.abs_diff_eq(&array![-1., 0.5, 0., 2.232050807568878, 4., -0.732050807568878], 1e-7))
     }
 }
