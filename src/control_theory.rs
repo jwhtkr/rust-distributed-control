@@ -186,12 +186,10 @@ where
             .sum::<T>()
             .sqrt();
         if diff < tol {
-            println!("Returning early ({_i}) with sufficiently small update");
             return Ok(p_next);
         }
         p_mat = p_next;
     }
-    println!("Reached iteration maximum.");
     Ok(p_mat)
 }
 
