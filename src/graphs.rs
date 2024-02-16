@@ -11,9 +11,13 @@ where
     E: LinalgScalar,
     Ty: EdgeType,
 {
-    Array2::from_shape_fn((graph.node_count(), graph.node_count()), |(i, j)| {
+    let adj =Array2::from_shape_fn((graph.node_count(), graph.node_count()), |(i, j)| {
         *get_edge_weight(&graph, i, j).unwrap_or(&E::zero())
-    })
+    });
+    if graph.is_directed() {
+        return adj.t().to_owned();
+    }
+    adj
 }
 
 /// Generate the weighted degree matrix of a communication graph.
@@ -46,7 +50,7 @@ where
         out[(a.index(), edge_idx.index())] = E::zero() - E::one();
         out[(b.index(), edge_idx.index())] = E::one();
     }
-    return out;
+    out
 }
 
 /// Generate the weighted edge matrix of the communication graph.
