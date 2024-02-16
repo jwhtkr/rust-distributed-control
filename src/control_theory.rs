@@ -64,6 +64,7 @@ fn pow<T: LinalgScalar>(mat: &Array2<T>, exponent: u32) -> Array2<T> {
 /// # Examples
 /// ```
 /// use ndarray::array;
+/// use distributed_control::control_theory::controllable;
 ///
 /// let a_mat = array![[0., 1.], [0., 0.]];
 /// let b_mat = array![[0.], [1.]];
@@ -119,7 +120,8 @@ pub fn controllability_matrix<T: LinalgScalar>(a_mat: &Array2<T>, b_mat: &Array2
 ///
 /// # Examples
 /// ```
-/// use ndarray::{array, Array2}
+/// use ndarray::{array, Array2};
+/// use distributed_control::control_theory::care_iterative;
 ///
 /// let a_mat = array![[0., 1.], [0., 0.]];
 /// let b_mat = array![[0., 0.], [1., 1.]];

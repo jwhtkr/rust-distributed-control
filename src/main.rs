@@ -10,7 +10,7 @@ fn main() {
     let u = |_t: f64, x: &Array1<f64>| -laplacian.dot(x);
 
     let states = dc::EulerIntegration::simulate(
-        (0..100).map(|i| i as f64 * 0.1).collect(),
+        &(0..100).map(|i| i as f64 * 0.1).collect(),
         &initial_states,
         &mas,
         &u,

@@ -36,7 +36,7 @@ where
     /// iteratively applies the `step` method over each adjacent pair
     /// of times in the `times` argument and collects the results in
     /// an array.
-    fn simulate(times: Vec<T>, x0: &Array1<T>, dynamics: &D, input: &U) -> Array2<T> {
+    fn simulate(times: &Vec<T>, x0: &Array1<T>, dynamics: &D, input: &U) -> Array2<T> {
         let mut history = Array2::zeros((x0.len(), times.len()).f());
         history.column_mut(0).assign(x0);
         let mut x_curr = x0.clone();
@@ -49,7 +49,7 @@ where
             history.column_mut(i + 1).assign(&x_next);
             x_curr = x_next;
         }
-        return history;
+        history
     }
 }
 
@@ -66,6 +66,6 @@ where
     fn step(t0: T, tf: T, x0: &Array1<T>, dynamics: &D, input: &U) -> Array1<T> {
         let delta_t = tf - t0;
         let u = input(t0, x0);
-        return x0 + dynamics.dynamics(t0, x0, &u) * delta_t;
+        x0 + dynamics.dynamics(t0, x0, &u) * delta_t
     }
 }
