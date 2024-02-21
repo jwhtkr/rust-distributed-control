@@ -52,14 +52,14 @@ pub fn single_integrator_consensus<T: LinalgScalar>(
 pub fn single_integrator_forced_consensus<T: LinalgScalar>(
     neg_laplacian: &Array2<T>,
     pinning_gains: &Array1<T>,
-    reference: impl Fn(T, &Array1<T>) -> Array1<T>,
+    reference: impl Fn(T) -> Array1<T>,
     n_states: usize,
 ) -> impl Fn(T, &Array1<T>) -> Array1<T> {
     let pinning_gains = pinning_gains.clone();
     let neg_l_plus_k = neg_laplacian - Array2::from_diag(&pinning_gains);
     let state_feedback = kron(&neg_l_plus_k, &Array2::eye(n_states));
     move |t: T, x: &Array1<T>| -> Array1<T> {
-        let r_vec = reference(t, x);
+        let r_vec = reference(t);
         let pinned_ref = kron(
             &pinning_gains.slice(s![.., ndarray::NewAxis]),
             &r_vec.insert_axis(ndarray::Axis(1)),
