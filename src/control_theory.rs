@@ -1,7 +1,9 @@
 //! This module contains common control-theoretic functions or computations.
 
-use ndarray::{s, Array2, LinalgScalar};
-use ndarray_linalg::{error::LinalgError, Inverse, Lapack, Scalar, SVD};
+use ndarray::{linalg::kron, s, Array1, Array2, LinalgScalar};
+use ndarray_linalg::{error::LinalgError, Inverse, Lapack, Norm, Scalar, Solve, SVD};
+
+use crate::dynamics;
 
 /// Determine the rank of a matrix (using the SVD).
 ///
@@ -202,6 +204,35 @@ pub fn k_from_p<T: LinalgScalar + ndarray_linalg::Lapack>(
     p_mat: &Array2<T>,
 ) -> Result<Array2<T>, LinalgError> {
     Ok(Array2::inv(r_mat)?.dot(&b_mat.t()).dot(p_mat))
+}
+
+/// Determine the synchronization map of a leaderless homogeneous MAS.
+///
+/// Computed as $(w_\ell^\text{T} \otimes e^{tA})x_0$ where $w_\ell$ is the
+/// normalized left eigenvector associated with the zero eigenvalue of the graph
+/// Laplacian, $A$ is the homogenous state matrix, and $x_0$ is the initial
+/// state.
+/// Or, converting to an LTI system: $\dot{x*} = Ax*$,
+/// $x*_0 = (w_l^\text{T} \otimes I_n)x_0$.
+fn synchronization_map<T: LinalgScalar + Lapack>(
+    laplacian: &Array2<T>,
+    a_mat: &Array2<T>,
+    x0: &Array1<T>,
+) -> (dynamics::LtiDynamics<T>, Array1<T>) {
+    let mut left_eig_vec = laplacian
+        .solve_t(&Array1::zeros(laplacian.ncols()))
+        .unwrap();
+    let norm = left_eig_vec.norm();
+    left_eig_vec.mapv_inplace(|v| v.div_real(norm));
+
+    (
+        dynamics::LtiDynamics::new(a_mat.clone(), Array2::zeros((a_mat.nrows(), 1))),
+        kron(
+            &left_eig_vec.slice(s![.., ndarray::NewAxis]),
+            &Array2::eye(a_mat.nrows()),
+        )
+        .dot(x0),
+    )
 }
 
 #[cfg(test)]
