@@ -22,7 +22,10 @@ use ndarray_linalg::{error::LinalgError, Lapack, SVD};
 /// use dc::{EulerIntegration, HomMas, integrator::Integrator, LtiDynamics};
 ///
 /// let laplacian = array![[1., -1., 0.], [-1., 2., -1.], [0., -1., 1.]];
-/// let control = dc::control_laws::single_integrator_consensus(&-laplacian, 2);
+/// let offsets = array![0., 0., 0., 0., 0., 0.];
+/// let control = dc::control_laws::single_integrator_consensus(
+///     &-laplacian, &offsets, 2
+/// );
 /// let x0 = array![-1., 0., 0., 0., 2., 2.];
 /// let single_integrator_dynamics = LtiDynamics::new(Array2::zeros((2, 2)), Array2::eye(2));
 /// let single_integrator_mas = HomMas::new(&single_integrator_dynamics, 3);
@@ -30,12 +33,13 @@ use ndarray_linalg::{error::LinalgError, Lapack, SVD};
 ///
 /// assert_eq!(step_state, array![0., 0., 1., 2., 0., 0.]);
 /// ```
-pub fn single_integrator_consensus<T: LinalgScalar>(
+pub fn single_integrator_consensus<'a, T: LinalgScalar>(
     neg_laplacian: &Array2<T>,
+    offsets: &'a Array1<T>,
     n_states: usize,
-) -> impl Fn(T, &Array1<T>) -> Array1<T> {
-    let feedback_mat = kron(&neg_laplacian, &Array2::eye(n_states));
-    move |_t: T, x: &Array1<T>| -> Array1<T> { feedback_mat.dot(x) }
+) -> impl Fn(T, &Array1<T>) -> Array1<T> + 'a {
+    let feedback_mat = kron(neg_laplacian, &Array2::eye(n_states));
+    move |_t: T, x: &Array1<T>| -> Array1<T> { feedback_mat.dot(&(x - offsets)) }
 }
 
 /// Create the control for single integrator forced consensus.
@@ -49,12 +53,39 @@ pub fn single_integrator_consensus<T: LinalgScalar>(
 /// $$
 /// where $\otimes$ denotes that Kronecker product and $n$ is the size of the
 /// state.
-pub fn single_integrator_forced_consensus<T: LinalgScalar>(
+/// # Examples
+/// ```
+/// use ndarray::{array, s, Array1, Array2};
+/// use distributed_control as dc;
+/// use dc::{control_laws::single_integrator_forced_consensus, integrator::Integrator, *};
+///
+/// let laplacian = array![[0., 0., 0.], [-1., 1., 0.], [0., -1., 1.]];
+/// let offsets = array![0., 0., 0., 0., 0., 0.];
+/// let pinning_gains = array![1., 0., 0.];
+/// let reference = |_t| array![1., -2.];
+/// let control = single_integrator_forced_consensus(
+///     &-&laplacian, &offsets, &pinning_gains, reference, 2
+/// );
+/// let x0 = array![-1., 0., 0., 0., 2., 2.];
+/// let agent_dyn_2d = LtiDynamics::new(Array2::zeros((2, 2)), Array2::eye(2));
+/// let mas_dyn_3_agents = HomMas::new(&agent_dyn_2d, 3);
+/// let times = Array1::linspace(0.0, 20.0, 201).into_iter().collect();
+/// let states = EulerIntegration::simulate(&times, &x0, &mas_dyn_3_agents, &control);
+///
+/// println!("{}", states.slice(s![.., -1]));
+/// assert!(
+///     states.slice(s![.., -1]).abs_diff_eq(
+///         &array![1., -2., 1., -2., 1., -2.], 1e-6
+///     )
+/// )
+/// ```
+pub fn single_integrator_forced_consensus<'a, T: LinalgScalar>(
     neg_laplacian: &Array2<T>,
+    offsets: &'a Array1<T>,
     pinning_gains: &Array1<T>,
-    reference: impl Fn(T) -> Array1<T>,
+    reference: impl Fn(T) -> Array1<T> + 'a,
     n_states: usize,
-) -> impl Fn(T, &Array1<T>) -> Array1<T> {
+) -> impl Fn(T, &Array1<T>) -> Array1<T> + 'a {
     let pinning_gains = pinning_gains.clone();
     let neg_l_plus_k = neg_laplacian - Array2::from_diag(&pinning_gains);
     let state_feedback = kron(&neg_l_plus_k, &Array2::eye(n_states));
@@ -65,7 +96,7 @@ pub fn single_integrator_forced_consensus<T: LinalgScalar>(
             &r_vec.insert_axis(ndarray::Axis(1)),
         )
         .remove_axis(ndarray::Axis(1));
-        state_feedback.dot(x) + pinned_ref
+        state_feedback.dot(&(x - offsets)) + pinned_ref
     }
 }
 
@@ -122,7 +153,8 @@ mod tests {
     #[test]
     fn test_single_integrator_feedback() {
         let laplacian = array![[1., -1., 0.], [-1., 2., -1.], [0., -1., 1.]];
-        let control = single_integrator_consensus(&-&laplacian, 2);
+        let offsets = array![0., 0., 0., 0., 0., 0.];
+        let control = single_integrator_consensus(&-&laplacian, &offsets, 2);
         let x0 = array![-1., 0., 0., 0., 2., 2.];
         let single_integrator_2 = LtiDynamics::new(Array2::zeros((2, 2)), Array2::eye(2));
         let single_integrator_3_2 = HomMas::new(&single_integrator_2, 3);
@@ -130,6 +162,25 @@ mod tests {
 
         let k = kron(&-&laplacian, &Array2::eye(2));
         assert_eq!(step_state, k.dot(&x0) + &x0);
+    }
+
+    #[test]
+    fn test_forced_single_int() {
+        let laplacian = array![[0., 0., 0.], [-1., 1., 0.], [0., -1., 1.]];
+        let offsets = array![0., 0., 0., 0., 0., 0.];
+        let pinning_gains = array![1., 0., 0.];
+        let reference = |_t| array![1., -2.];
+        let control = single_integrator_forced_consensus(&-&laplacian, &offsets, &pinning_gains, reference, 2);
+        let x0 = array![-1., 0., 0., 0., 2., 2.];
+        let single_integrator_2 = LtiDynamics::new(Array2::zeros((2, 2)), Array2::eye(2));
+        let single_integrator_3_2 = HomMas::new(&single_integrator_2, 3);
+        let times = Array1::linspace(0.0, 20.0, 201).into_iter().collect();
+        let states = EulerIntegration::simulate(&times, &x0, &single_integrator_3_2, &control);
+
+        println!("{}", states.slice(s![.., -1]));
+        assert!(
+            states.slice(s![.., -1]).abs_diff_eq(&array![1., -2., 1., -2., 1., -2.], 1e-6)
+        )
     }
 
     #[test]
