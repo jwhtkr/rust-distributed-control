@@ -26,7 +26,7 @@ pub fn rank<T: Lapack>(mat: &Array2<T>, eps: Option<f64>) -> Result<usize, Linal
         .max_by(|&left, &right| left.partial_cmp(&right).unwrap())
         .unwrap();
     let max_dim = mat.nrows().max(mat.ncols());
-    let eps = eps.or(Some(f64::EPSILON)).unwrap();
+    let eps = eps.unwrap_or(f64::EPSILON);
     let tol = sv_max * T::real(max_dim) * T::real(eps);
     Ok(singular_values
         .iter()
@@ -162,7 +162,7 @@ where
 {
     let dt = dt.or(T::from_f64(0.001)).unwrap();
     let tol = tol.or(T::from_f64(1.0e-10)).unwrap();
-    let iter_max = iter_max.or(Some(100000)).unwrap();
+    let iter_max = iter_max.unwrap_or(100000);
 
     let mut p_mat = q_mat.clone();
 
@@ -274,8 +274,8 @@ mod tests {
         .unwrap();
         assert!(p_mat.abs_diff_eq(
             &array![
-                [1.553773974030038, 0.707106781186548],
-                [0.707106781186548, 1.098684113467811]
+                [1.553773974030038, std::f64::consts::FRAC_1_SQRT_2],
+                [std::f64::consts::FRAC_1_SQRT_2, 1.098684113467811]
             ],
             1.0e-7
         ));

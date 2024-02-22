@@ -10,11 +10,11 @@ use ndarray::{s, Array1, Array2, LinalgScalar};
 /// but this crate focuses on Linear time-invariant dynamics.
 pub trait Dynamics<T: LinalgScalar> {
     /// Calculate the dynamics, i.e., $\dot{x} = f(t, x, u(t, x))$
-    fn dynamics(self: &Self, t: T, x: &Array1<T>, u: &Array1<T>) -> Array1<T>;
+    fn dynamics(&self, t: T, x: &Array1<T>, u: &Array1<T>) -> Array1<T>;
     /// Get the dimension of the state $x$.
-    fn n_state(self: &Self) -> usize;
+    fn n_state(&self) -> usize;
     /// Get the dimension of the input $u$.
-    fn n_input(self: &Self) -> usize;
+    fn n_input(&self) -> usize;
 }
 
 /// Multi-agent system dynamics with possibly heterogeneous
@@ -46,8 +46,7 @@ pub fn compact_dynamics<T: LinalgScalar>(mas_dynamics: &dyn MasDynamics<T>, t: T
     let mut x_next = Array1::zeros((n_x_total,));
     let mut x_i_start = 0;
     let mut u_i_start = 0;
-    for i in 0..mas_dynamics.n_agents() {
-        let _dyn = all_dynamics[i];
+    for _dyn in all_dynamics.into_iter() {
         let n_x_i = _dyn.n_state();
         let n_u_i = _dyn.n_input();
         let x_i_end = x_i_start + n_x_i;
@@ -63,8 +62,7 @@ pub fn compact_dynamics<T: LinalgScalar>(mas_dynamics: &dyn MasDynamics<T>, t: T
         x_i_start = x_i_end;
         u_i_start = u_i_end;
     }
-
-    return x_next;
+    x_next
 }
 
 /// Implement linear, time-invariant (LTI) dynamics. I.e.,
@@ -94,15 +92,15 @@ impl<T: LinalgScalar> LtiDynamics<T> {
 }
 
 impl<T: LinalgScalar> Dynamics<T> for LtiDynamics<T> {
-    fn n_input(self: &Self) -> usize {
+    fn n_input(&self) -> usize {
         self.b_mat.ncols()
     }
 
-    fn n_state(self: &Self) -> usize {
+    fn n_state(&self) -> usize {
         self.a_mat.ncols()
     }
 
-    fn dynamics(self: &Self, _t: T, x: &Array1<T>, u: &Array1<T>) -> Array1<T> {
+    fn dynamics(&self, _t: T, x: &Array1<T>, u: &Array1<T>) -> Array1<T> {
         self.a_mat.dot(x) + self.b_mat.dot(u)
     }
 }

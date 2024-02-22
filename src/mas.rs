@@ -46,14 +46,12 @@ impl<'a, T: LinalgScalar> Dynamics<T> for HomMas<'a, T> {
 
     fn n_input(&self) -> usize {
         (0..self.n_agents())
-            .map(|i| self.mas_dynamics(i).unwrap().n_input())
-            .fold(0, |acc, el| acc + el)
+            .map(|i| self.mas_dynamics(i).unwrap().n_input()).sum()
     }
 
     fn n_state(&self) -> usize {
         (0..self.n_agents())
-            .map(|i| self.mas_dynamics(i).unwrap().n_state())
-            .fold(0, |acc, el| acc + el)
+            .map(|i| self.mas_dynamics(i).unwrap().n_state()).sum()
     }
 }
 

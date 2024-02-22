@@ -12,7 +12,7 @@ where
     Ty: EdgeType,
 {
     let adj =Array2::from_shape_fn((graph.node_count(), graph.node_count()), |(i, j)| {
-        *get_edge_weight(&graph, i, j).unwrap_or(&E::zero())
+        *get_edge_weight(graph, i, j).unwrap_or(&E::zero())
     });
     if graph.is_directed() {
         return adj.t().to_owned();
@@ -98,7 +98,7 @@ mod tests {
             petgraph::graph::node_index(2),
             1.,
         );
-        return g;
+        g
     }
 
     #[test]
