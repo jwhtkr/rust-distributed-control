@@ -4,7 +4,7 @@
 use std::ops::Mul;
 
 use ndarray::{linalg::kron, s, Array1, Array2, LinalgScalar, ScalarOperand};
-use ndarray_linalg::{error::LinalgError, Lapack, SVD};
+use ndarray_linalg::{error::LinalgError, EigVals, Lapack, Scalar, SVD};
 
 /// Create the consensus feedback control law for homogenous single-integrators.
 ///
@@ -125,18 +125,19 @@ pub fn homogenous_leaderless_synchronization<T: LinalgScalar + ScalarOperand>(
 /// $$
 ///     c = \frac{1}{2\operatorname{Re}(\lambda_2(L))}
 /// $$
-pub fn coupling_gain<T: LinalgScalar + Lapack<Real = T> + std::cmp::PartialOrd>(
+pub fn coupling_gain<T: LinalgScalar + Lapack + std::cmp::PartialOrd>(
     laplacian: &Array2<T>,
 ) -> Result<T, LinalgError> {
-    let (_, eig, _) = SVD::svd(laplacian, false, false)?;
+    // let (_, eig, _) = SVD::svd(laplacian, false, false)?;
+    let eig = laplacian.eigvals()?;
     let nonzero = eig
         .iter()
         .map(|&v| v.re())
-        .filter(|&v| T::from_f64(1e-12).unwrap() < v);
+        .filter(|&v| T::from_f64(1e-12).unwrap() < T::from_real(v));
     let min_nonzero = nonzero
-        .reduce(|v1, v2| if v1 <= v2 { v1 } else { v2 })
+        .min_by(|a, b| a.partial_cmp(b).unwrap())
         .unwrap();
-    Ok(T::one() / T::from_f64(2.0).unwrap() / min_nonzero)
+    Ok(T::one() / T::from_f64(2.0).unwrap() / T::from_real(min_nonzero))
 }
 
 #[cfg(test)]
@@ -165,6 +166,20 @@ mod tests {
     }
 
     #[test]
+    fn test_single_int_offset() {
+        let laplacian = array![[1., -1., 0.], [-1., 2., -1.], [0., -1., 1.]];
+        let offsets = array![0., 0., 1., 0., 0., 1.];
+        let control = single_integrator_consensus(&-&laplacian, &offsets, 2);
+        let x0 = array![-1., 0., 0., 0., 2., 2.];
+        let single_integrator_2 = LtiDynamics::new(Array2::zeros((2, 2)), Array2::eye(2));
+        let single_integrator_3_2 = HomMas::new(&single_integrator_2, 3);
+        let times = Array1::linspace(0., 20., 201).into_iter().collect();
+        let states = EulerIntegration::simulate(&times, &x0, &single_integrator_3_2, &control);
+
+        assert!(states.slice(s![.., -1]).abs_diff_eq(&array![0., 1./3., 1., 1./3., 0., 4./3.], 1e-8));
+    }
+
+    #[test]
     fn test_forced_single_int() {
         let laplacian = array![[0., 0., 0.], [-1., 1., 0.], [0., -1., 1.]];
         let offsets = array![0., 0., 0., 0., 0., 0.];
@@ -177,14 +192,31 @@ mod tests {
         let times = Array1::linspace(0.0, 20.0, 201).into_iter().collect();
         let states = EulerIntegration::simulate(&times, &x0, &single_integrator_3_2, &control);
 
-        println!("{}", states.slice(s![.., -1]));
         assert!(
             states.slice(s![.., -1]).abs_diff_eq(&array![1., -2., 1., -2., 1., -2.], 1e-6)
         )
     }
 
     #[test]
-    fn test_hom_leaderless_synch() {
+    fn test_forced_single_int_offset() {
+        let laplacian = array![[0., 0., 0.], [-1., 1., 0.], [0., -1., 1.]];
+        let offsets = array![0., 0., 1., 0., 0., 1.];
+        let pinning_gains = array![1., 0., 0.];
+        let reference = |_t| array![1., -2.];
+        let control = single_integrator_forced_consensus(&-&laplacian, &offsets, &pinning_gains, reference, 2);
+        let x0 = array![-1., 0., 0., 0., 2., 2.];
+        let single_integrator_2 = LtiDynamics::new(Array2::zeros((2, 2)), Array2::eye(2));
+        let single_integrator_3_2 = HomMas::new(&single_integrator_2, 3);
+        let times = Array1::linspace(0.0, 20.0, 201).into_iter().collect();
+        let states = EulerIntegration::simulate(&times, &x0, &single_integrator_3_2, &control);
+
+        assert!(
+            states.slice(s![.., -1]).abs_diff_eq(&array![1., -2., 2., -2., 1., -1.], 1e-6)
+        )
+    }
+
+    #[test]
+    fn test_hom_leaderless_sync() {
         let laplacian = array![[1., -1., 0.], [-1., 2., -1.], [0., -1., 1.]];
         let a_mat = array![[0., 1.], [0., 0.]];
         let b_mat = array![[0.], [1.]];
