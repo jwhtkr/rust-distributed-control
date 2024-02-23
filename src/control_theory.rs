@@ -1,7 +1,7 @@
 //! This module contains common control-theoretic functions or computations.
 
 use ndarray::{linalg::kron, s, Array1, Array2, LinalgScalar};
-use ndarray_linalg::{error::LinalgError, Inverse, Lapack, Norm, Scalar, Solve, SVD};
+use ndarray_linalg::{error::LinalgError, Eig, Inverse, Lapack, Scalar, SVD};
 
 use crate::dynamics;
 
@@ -21,7 +21,7 @@ use crate::dynamics;
 /// assert_eq!(rank(&mat, Default::default()).expect("Error in rank"), 2);
 /// ```
 pub fn rank<T: Lapack>(mat: &Array2<T>, eps: Option<f64>) -> Result<usize, LinalgError> {
-    let (_, singular_values, _) = SVD::svd(mat, false, false)?;
+    let (_, singular_values, _) =  mat.svd(false, false)?;
     let sv_max = singular_values
         .iter()
         .map(|&v| v.abs().re())
@@ -214,21 +214,22 @@ pub fn k_from_p<T: LinalgScalar + ndarray_linalg::Lapack>(
 /// state.
 /// Or, converting to an LTI system: $\dot{x*} = Ax*$,
 /// $x*_0 = (w_l^\text{T} \otimes I_n)x_0$.
-fn synchronization_map<T: LinalgScalar + Lapack>(
+pub fn synchronization_map<T: LinalgScalar + Lapack + std::cmp::PartialOrd>(
     laplacian: &Array2<T>,
     a_mat: &Array2<T>,
     x0: &Array1<T>,
 ) -> (dynamics::LtiDynamics<T>, Array1<T>) {
-    let mut left_eig_vec = laplacian
-        .solve_t(&Array1::zeros(laplacian.ncols()))
+    let (eig_vals, left_eig_vecs) = laplacian.eig().unwrap();
+    let left_null_eig_vec = std::iter::zip(eig_vals.iter(), left_eig_vecs.columns())
+        .filter(|(&e, _v)| T::from_real(e.abs()) < T::from_f64(1e-10).unwrap())
+        .map(|(_e, v)| v.map(|el| T::from_real(el.re())))
+        .next()
         .unwrap();
-    let norm = left_eig_vec.norm();
-    left_eig_vec.mapv_inplace(|v| v.div_real(norm));
 
     (
         dynamics::LtiDynamics::new(a_mat.clone(), Array2::zeros((a_mat.nrows(), 1))),
         kron(
-            &left_eig_vec.slice(s![.., ndarray::NewAxis]),
+            &left_null_eig_vec.slice(s![.., ndarray::NewAxis]).t(),
             &Array2::eye(a_mat.nrows()),
         )
         .dot(x0),
