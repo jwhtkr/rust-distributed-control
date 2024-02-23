@@ -4,7 +4,7 @@
 use std::ops::Mul;
 
 use ndarray::{linalg::kron, s, Array1, Array2, LinalgScalar, ScalarOperand};
-use ndarray_linalg::{error::LinalgError, EigVals, Lapack, Scalar, SVD};
+use ndarray_linalg::{error::LinalgError, EigVals, Lapack, Scalar};
 
 /// Create the consensus feedback control law for homogenous single-integrators.
 ///

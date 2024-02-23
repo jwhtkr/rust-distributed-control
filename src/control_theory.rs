@@ -219,7 +219,7 @@ pub fn synchronization_map<T: LinalgScalar + Lapack + std::cmp::PartialOrd>(
     a_mat: &Array2<T>,
     x0: &Array1<T>,
 ) -> (dynamics::LtiDynamics<T>, Array1<T>) {
-    let (eig_vals, left_eig_vecs) = laplacian.eig().unwrap();
+    let (eig_vals, left_eig_vecs) = laplacian.t().eig().unwrap();
     let left_null_eig_vec = std::iter::zip(eig_vals.iter(), left_eig_vecs.columns())
         .filter(|(&e, _v)| T::from_real(e.abs()) < T::from_f64(1e-10).unwrap())
         .map(|(_e, v)| v.map(|el| T::from_real(el.re())))
