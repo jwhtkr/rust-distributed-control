@@ -1,6 +1,6 @@
 //! This module contains common control-theoretic functions or computations.
 
-use ndarray::{linalg::kron, s, Array1, Array2, LinalgScalar};
+use ndarray::{linalg::kron, s, Array1, Array2, LinalgScalar, ScalarOperand};
 use ndarray_linalg::{error::LinalgError, Eig, Inverse, Lapack, Scalar, SVD};
 
 use crate::dynamics;
@@ -214,17 +214,18 @@ pub fn k_from_p<T: LinalgScalar + ndarray_linalg::Lapack>(
 /// state.
 /// Or, converting to an LTI system: $\dot{x*} = Ax*$,
 /// $x*_0 = (w_l^\text{T} \otimes I_n)x_0$.
-pub fn synchronization_map<T: LinalgScalar + Lapack + std::cmp::PartialOrd>(
+pub fn synchronization_map<T: LinalgScalar + Lapack + std::cmp::PartialOrd + ScalarOperand>(
     laplacian: &Array2<T>,
     a_mat: &Array2<T>,
     x0: &Array1<T>,
 ) -> (dynamics::LtiDynamics<T>, Array1<T>) {
     let (eig_vals, left_eig_vecs) = laplacian.t().eig().unwrap();
-    let left_null_eig_vec = std::iter::zip(eig_vals.iter(), left_eig_vecs.columns())
+    let mut left_null_eig_vec = std::iter::zip(eig_vals.iter(), left_eig_vecs.columns())
         .filter(|(&e, _v)| T::from_real(e.abs()) < T::from_f64(1e-10).unwrap())
         .map(|(_e, v)| v.map(|el| T::from_real(el.re())))
         .next()
         .unwrap();
+    left_null_eig_vec *= T::one() / (left_null_eig_vec.dot(&Array1::ones(left_null_eig_vec.raw_dim())));
 
     (
         dynamics::LtiDynamics::new(a_mat.clone(), Array2::zeros((a_mat.nrows(), 1))),
