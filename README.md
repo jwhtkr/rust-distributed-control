@@ -8,6 +8,9 @@ The dynamics of the agents in a distributed multi-agent system can be either hom
 
 This library focuses on linear, time-invariant (LTI) dynamics, although it provides the tools to extend beyond this, including to non-linear and time-varying dynamics.
 
+## Dependencies
+This library depends on the `ndarray-linalg` crate, which in turn depends on an `LAPACK` library being installed. `ndarray-linalg` exposes [several options](https://github.com/rust-ndarray/ndarray-linalg?tab=readme-ov-file#backend-features) for choice of backend. To get going quickly, you can select the `ndarray-linalg/intel-mkl` feature when compiling/running/etc. It is strongly recommended, however, that you determine which backend best suites your needs and situation and specify that one instead.
+
 ## License
 
 Licensed under either of
