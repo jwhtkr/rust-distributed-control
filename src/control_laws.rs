@@ -3,7 +3,9 @@
 
 use std::ops::Mul;
 
-use ndarray::{linalg::kron, s, Array1, Array2, Data, LinalgScalar, ScalarOperand};
+use ndarray::{
+    linalg::kron, s, Array1, Array2, ArrayBase, Data, Ix1, Ix2, LinalgScalar, ScalarOperand,
+};
 use ndarray_linalg::{error::LinalgError, EigVals, Lapack, Scalar};
 
 /// Create the consensus feedback control law for homogenous single-integrators.
@@ -33,13 +35,13 @@ use ndarray_linalg::{error::LinalgError, EigVals, Lapack, Scalar};
 ///
 /// assert_eq!(step_state, array![0., 0., 1., 2., 0., 0.]);
 /// ```
-pub fn single_integrator_consensus<'a, T: LinalgScalar>(
-    neg_laplacian: &Array2<T>,
-    offsets: &'a Array1<T>,
+pub fn single_integrator_consensus<'a, T: LinalgScalar, S: Data<Elem = T>>(
+    neg_laplacian: &ArrayBase<S, Ix2>,
+    offsets: &'a ArrayBase<S, Ix1>,
     n_states: usize,
-) -> impl Fn(T, &Array1<T>) -> Array1<T> + 'a {
+) -> impl Fn(T, &ArrayBase<S, Ix1>) -> Array1<T> + 'a {
     let feedback_mat = kron(neg_laplacian, &Array2::eye(n_states));
-    move |_t: T, x: &Array1<T>| -> Array1<T> { feedback_mat.dot(&(x - offsets)) }
+    move |_t: T, x: &ArrayBase<S, Ix1>| -> Array1<T> { feedback_mat.dot(&(x - offsets)) }
 }
 
 /// Create the control for single integrator forced consensus.
@@ -79,17 +81,22 @@ pub fn single_integrator_consensus<'a, T: LinalgScalar>(
 ///     )
 /// )
 /// ```
-pub fn single_integrator_forced_consensus<'a, T: LinalgScalar>(
-    neg_laplacian: &Array2<T>,
-    offsets: &'a Array1<T>,
-    pinning_gains: &Array1<T>,
-    reference: impl Fn(T) -> Array1<T> + 'a,
+pub fn single_integrator_forced_consensus<
+    'a,
+    T: LinalgScalar,
+    S1: Data<Elem = T>,
+    S2: Data<Elem = T>,
+>(
+    neg_laplacian: &ArrayBase<S1, Ix2>,
+    offsets: &'a ArrayBase<S1, Ix1>,
+    pinning_gains: &'a ArrayBase<S1, Ix1>,
+    reference: impl Fn(T) -> ArrayBase<S2, Ix1> + 'a,
     n_states: usize,
-) -> impl Fn(T, &Array1<T>) -> Array1<T> + 'a {
+) -> impl Fn(T, &ArrayBase<S1, Ix1>) -> Array1<T> + 'a {
     let pinning_gains = pinning_gains.clone();
     let neg_l_plus_k = neg_laplacian - Array2::from_diag(&pinning_gains);
     let state_feedback = kron(&neg_l_plus_k, &Array2::eye(n_states));
-    move |t: T, x: &Array1<T>| -> Array1<T> {
+    move |t: T, x: &ArrayBase<S1, Ix1>| -> Array1<T> {
         let r_vec = reference(t);
         let pinned_ref = kron(
             &pinning_gains.slice(s![.., ndarray::NewAxis]),
@@ -110,13 +117,18 @@ pub fn single_integrator_forced_consensus<'a, T: LinalgScalar>(
 /// $$
 /// where $c$ is the coupling gain, $K$ the feedback gain matrix, $L$ is the
 /// Laplacian, and $\otimes$ denotes the Kronecker product.
-pub fn homogeneous_leaderless_synchronization<T: LinalgScalar + ScalarOperand>(
-    neg_laplacian: &Array2<T>,
+pub fn homogeneous_leaderless_synchronization<
+    'a,
+    T: LinalgScalar + ScalarOperand,
+    S: Data<Elem = T>,
+>(
+    neg_laplacian: &ArrayBase<S, Ix2>,
+    offsets: &'a ArrayBase<S, Ix1>,
     coupling_gain: T,
-    feedback_gain: &Array2<T>,
-) -> impl Fn(T, &Array1<T>) -> Array1<T> {
+    feedback_gain: &ArrayBase<S, Ix2>,
+) -> impl Fn(T, &ArrayBase<S, Ix1>) -> Array1<T> + 'a {
     let feedback_mat = kron(&neg_laplacian.mul(coupling_gain), feedback_gain);
-    move |_t: T, x: &Array1<T>| -> Array1<T> { feedback_mat.dot(x) }
+    move |_t: T, x: &ArrayBase<S, Ix1>| feedback_mat.dot(&(x - offsets))
 }
 
 /// Create the leader-follower synchronizing controller for a homogenous MAS
@@ -180,8 +192,10 @@ pub fn homogeneous_leaderless_synchronization<T: LinalgScalar + ScalarOperand>(
 ///             .unwrap(),
 ///     )
 /// };
+/// let offsets = array![0., 0., 0., 0., 0., 0.];
 /// let control = homogeneous_leader_follower_synchronization(
 ///     &-laplacian,
+///     &offsets,
 ///     c,
 ///     &k_mat,
 ///     &pinning_gains,
@@ -197,17 +211,16 @@ pub fn homogeneous_leaderless_synchronization<T: LinalgScalar + ScalarOperand>(
 pub fn homogeneous_leader_follower_synchronization<
     'a,
     T: LinalgScalar + ScalarOperand,
-    S: Data<Elem = T>,
+    S1: Data<Elem = T>,
+    S2: Data<Elem = T>,
 >(
-    neg_laplacian: &Array2<T>,
+    neg_laplacian: &ArrayBase<S1, Ix2>,
+    offsets: &'a ArrayBase<S1, Ix1>,
     coupling_gain: T,
-    feedback_gain: &Array2<T>,
-    pinning_gains: &Array1<T>,
-    reference: impl Fn(T) -> ndarray::ArrayBase<S, ndarray::Ix1> + 'a,
-) -> impl Fn(T, &Array1<T>) -> Array1<T> + 'a
-where
-    S: ndarray::Data<Elem = T>,
-{
+    feedback_gain: &ArrayBase<S1, Ix2>,
+    pinning_gains: &ArrayBase<S1, Ix1>,
+    reference: impl Fn(T) -> ArrayBase<S2, Ix1> + 'a,
+) -> impl Fn(T, &ArrayBase<S1, Ix1>) -> Array1<T> + 'a {
     let pinning_gains = Array2::from_diag(pinning_gains);
     let feedback_mat = kron(&(neg_laplacian - &pinning_gains), feedback_gain).mul(coupling_gain);
     let reference_mat = kron(&pinning_gains, feedback_gain).mul(coupling_gain);
@@ -218,7 +231,7 @@ where
                 .flatten()
                 .cloned(),
         );
-        feedback_mat.dot(x) + reference_mat.dot(&reference)
+        feedback_mat.dot(&(x - offsets)) + reference_mat.dot(&reference)
     }
 }
 
@@ -228,8 +241,8 @@ where
 /// $$
 ///     c = \frac{1}{2\operatorname{Re}(\lambda_2(L))}
 /// $$
-pub fn coupling_gain<T: LinalgScalar + Lapack + std::cmp::PartialOrd>(
-    laplacian: &Array2<T>,
+pub fn coupling_gain<T: LinalgScalar + Lapack + std::cmp::PartialOrd, S: Data<Elem = T>>(
+    laplacian: &ArrayBase<S, Ix2>,
 ) -> Result<T, LinalgError> {
     // let (_, eig, _) = SVD::svd(laplacian, false, false)?;
     let eig = laplacian.eigvals()?;
@@ -356,7 +369,8 @@ mod tests {
         )
         .unwrap();
         let c = coupling_gain(&laplacian).unwrap();
-        let control = homogeneous_leaderless_synchronization(&-laplacian, c, &k_mat);
+        let offsets = array![0., 0., 0., 0., 0., 0.];
+        let control = homogeneous_leaderless_synchronization(&-laplacian, &offsets, c, &k_mat);
         let state_step = EulerIntegration::step(0.0, 1.0, &x0, &mas, &control);
 
         assert!(state_step.abs_diff_eq(
@@ -405,8 +419,10 @@ mod tests {
                     .unwrap(),
             )
         };
+        let offsets = array![0., 0., 0., 0., 0., 0.];
         let control = homogeneous_leader_follower_synchronization(
             &-laplacian,
+            &offsets,
             c,
             &k_mat,
             &pinning_gains,
