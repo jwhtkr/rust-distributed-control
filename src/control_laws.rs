@@ -3,7 +3,7 @@
 
 use std::ops::Mul;
 
-use ndarray::{linalg::kron, s, Array1, Array2, LinalgScalar, ScalarOperand};
+use ndarray::{linalg::kron, s, Array1, Array2, Data, LinalgScalar, ScalarOperand};
 use ndarray_linalg::{error::LinalgError, EigVals, Lapack, Scalar};
 
 /// Create the consensus feedback control law for homogenous single-integrators.
@@ -110,13 +110,116 @@ pub fn single_integrator_forced_consensus<'a, T: LinalgScalar>(
 /// $$
 /// where $c$ is the coupling gain, $K$ the feedback gain matrix, $L$ is the
 /// Laplacian, and $\otimes$ denotes the Kronecker product.
-pub fn homogenous_leaderless_synchronization<T: LinalgScalar + ScalarOperand>(
+pub fn homogeneous_leaderless_synchronization<T: LinalgScalar + ScalarOperand>(
     neg_laplacian: &Array2<T>,
     coupling_gain: T,
     feedback_gain: &Array2<T>,
 ) -> impl Fn(T, &Array1<T>) -> Array1<T> {
     let feedback_mat = kron(&neg_laplacian.mul(coupling_gain), feedback_gain);
     move |_t: T, x: &Array1<T>| -> Array1<T> { feedback_mat.dot(x) }
+}
+
+/// Create the leader-follower synchronizing controller for a homogenous MAS
+///
+/// If $L$ is the graph Laplacian, $h$ is a vector of pinning gains for each
+/// agent, $c$ is a coupling gain, and $K$ is a feedback gain matrix, with the
+/// leader reference given as a function of time in $r(t)$, then this control
+/// law is:
+/// $$
+///     u(t,x) = -c ((L + H) \otimes K) x + c (h \otimes Kr(t))
+/// $$
+///
+/// # Examples
+///
+/// ```
+/// use ndarray::{array, s, Array1, Array2};
+///
+/// use distributed_control as dc;
+/// use dc::{
+///     control_laws::{coupling_gain, homogeneous_leader_follower_synchronization},
+///     control_theory::{care_iterative, k_from_p},
+///     integrator::Integrator,
+///     *,
+/// };
+///
+/// let laplacian = array![[0., 0., 0.], [-1., 1., 0.], [0., -1., 1.]];
+/// let a_mat = array![[0., 1.], [0., 0.]];
+/// let b_mat = array![[0.], [1.]];
+/// let dynamics = LtiDynamics::new(a_mat.clone(), b_mat.clone());
+/// let mas = HomMas::new(&dynamics, 3);
+/// let x0 = array![-1., 0., 0., 0., 2., 2.];
+/// let q_mat = Array2::eye(2);
+/// let r_mat = Array2::eye(1);
+/// let k_mat = k_from_p(
+///     &b_mat,
+///     &r_mat,
+///     &care_iterative(
+///         &a_mat,
+///         &b_mat,
+///         &q_mat,
+///         &r_mat,
+///         Default::default(),
+///         Default::default(),
+///         Default::default(),
+///     )
+///     .unwrap(),
+/// )
+/// .unwrap();
+/// let c = coupling_gain(&laplacian).unwrap();
+/// let pinning_gains = array![1., 0., 0.];
+/// let times = Array1::linspace(0.0, 30.0, 301).into_iter().collect();
+/// let r0 = array![-4., 0.];
+/// let reference_states =
+///     EulerIntegration::simulate(&times, &r0, &dynamics, &|_t, _x| array![0.]);
+/// let reference = |t| {
+///     reference_states.column(
+///         times
+///             .iter()
+///             .enumerate()
+///             .find_map(|(i, &v)| if v == t { Some(i) } else { None })
+///             .unwrap(),
+///     )
+/// };
+/// let control = homogeneous_leader_follower_synchronization(
+///     &-laplacian,
+///     c,
+///     &k_mat,
+///     &pinning_gains,
+///     reference,
+/// );
+/// let states = EulerIntegration::simulate(&times, &x0, &mas, &control);
+///
+/// assert!(states.slice(s![.., -1]).abs_diff_eq(
+///     &array![-4., 0., -4., 0., -4., 0.],
+///     0.1
+/// ));
+///```
+pub fn homogeneous_leader_follower_synchronization<
+    'a,
+    T: LinalgScalar + ScalarOperand,
+    S: Data<Elem = T>,
+>(
+    neg_laplacian: &Array2<T>,
+    coupling_gain: T,
+    feedback_gain: &Array2<T>,
+    pinning_gains: &Array1<T>,
+    reference: impl Fn(T) -> ndarray::ArrayBase<S, ndarray::Ix1> + 'a,
+) -> impl Fn(T, &Array1<T>) -> Array1<T> + 'a
+where
+    S: ndarray::Data<Elem = T>,
+{
+    let pinning_gains = Array2::from_diag(pinning_gains);
+    let feedback_mat = kron(&(neg_laplacian - &pinning_gains), feedback_gain).mul(coupling_gain);
+    let reference_mat = kron(&pinning_gains, feedback_gain).mul(coupling_gain);
+    move |t, x| {
+        let reference = Array1::from_iter(
+            std::iter::repeat(reference(t).iter())
+                .take(pinning_gains.nrows())
+                .flatten()
+                .cloned(),
+        );
+        feedback_mat.dot(x) + reference_mat.dot(&reference)
+    }
 }
 
 /// Determine the coupling gain that corresponds to a graph Laplacian matrix.
@@ -134,9 +237,7 @@ pub fn coupling_gain<T: LinalgScalar + Lapack + std::cmp::PartialOrd>(
         .iter()
         .map(|&v| v.re())
         .filter(|&v| T::from_f64(1e-12).unwrap() < T::from_real(v));
-    let min_nonzero = nonzero
-        .min_by(|a, b| a.partial_cmp(b).unwrap())
-        .unwrap();
+    let min_nonzero = nonzero.min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
     Ok(T::one() / T::from_f64(2.0).unwrap() / T::from_real(min_nonzero))
 }
 
@@ -176,7 +277,9 @@ mod tests {
         let times = Array1::linspace(0., 20., 201).into_iter().collect();
         let states = EulerIntegration::simulate(&times, &x0, &single_integrator_3_2, &control);
 
-        assert!(states.slice(s![.., -1]).abs_diff_eq(&array![0., 1./3., 1., 1./3., 0., 4./3.], 1e-8));
+        assert!(states
+            .slice(s![.., -1])
+            .abs_diff_eq(&array![0., 1. / 3., 1., 1. / 3., 0., 4. / 3.], 1e-8));
     }
 
     #[test]
@@ -185,16 +288,22 @@ mod tests {
         let offsets = array![0., 0., 0., 0., 0., 0.];
         let pinning_gains = array![1., 0., 0.];
         let reference = |_t| array![1., -2.];
-        let control = single_integrator_forced_consensus(&-&laplacian, &offsets, &pinning_gains, reference, 2);
+        let control = single_integrator_forced_consensus(
+            &-&laplacian,
+            &offsets,
+            &pinning_gains,
+            reference,
+            2,
+        );
         let x0 = array![-1., 0., 0., 0., 2., 2.];
         let single_integrator_2 = LtiDynamics::new(Array2::zeros((2, 2)), Array2::eye(2));
         let single_integrator_3_2 = HomMas::new(&single_integrator_2, 3);
         let times = Array1::linspace(0.0, 20.0, 201).into_iter().collect();
         let states = EulerIntegration::simulate(&times, &x0, &single_integrator_3_2, &control);
 
-        assert!(
-            states.slice(s![.., -1]).abs_diff_eq(&array![1., -2., 1., -2., 1., -2.], 1e-6)
-        )
+        assert!(states
+            .slice(s![.., -1])
+            .abs_diff_eq(&array![1., -2., 1., -2., 1., -2.], 1e-6))
     }
 
     #[test]
@@ -203,16 +312,22 @@ mod tests {
         let offsets = array![0., 0., 1., 0., 0., 1.];
         let pinning_gains = array![1., 0., 0.];
         let reference = |_t| array![1., -2.];
-        let control = single_integrator_forced_consensus(&-&laplacian, &offsets, &pinning_gains, reference, 2);
+        let control = single_integrator_forced_consensus(
+            &-&laplacian,
+            &offsets,
+            &pinning_gains,
+            reference,
+            2,
+        );
         let x0 = array![-1., 0., 0., 0., 2., 2.];
         let single_integrator_2 = LtiDynamics::new(Array2::zeros((2, 2)), Array2::eye(2));
         let single_integrator_3_2 = HomMas::new(&single_integrator_2, 3);
         let times = Array1::linspace(0.0, 20.0, 201).into_iter().collect();
         let states = EulerIntegration::simulate(&times, &x0, &single_integrator_3_2, &control);
 
-        assert!(
-            states.slice(s![.., -1]).abs_diff_eq(&array![1., -2., 2., -2., 1., -1.], 1e-6)
-        )
+        assert!(states
+            .slice(s![.., -1])
+            .abs_diff_eq(&array![1., -2., 2., -2., 1., -1.], 1e-6))
     }
 
     #[test]
@@ -241,12 +356,66 @@ mod tests {
         )
         .unwrap();
         let c = coupling_gain(&laplacian).unwrap();
-        let control = homogenous_leaderless_synchronization(&-laplacian, c, &k_mat);
+        let control = homogeneous_leaderless_synchronization(&-laplacian, c, &k_mat);
         let state_step = EulerIntegration::step(0.0, 1.0, &x0, &mas, &control);
 
         assert!(state_step.abs_diff_eq(
             &array![-1., 0.5, 0., 2.232050807568878, 4., -0.732050807568878],
             1e-7
         ))
+    }
+
+    #[test]
+    fn test_hom_leader_follower_sync() {
+        let laplacian = array![[0., 0., 0.], [-1., 1., 0.], [0., -1., 1.]];
+        let a_mat = array![[0., 1.], [0., 0.]];
+        let b_mat = array![[0.], [1.]];
+        let dynamics = LtiDynamics::new(a_mat.clone(), b_mat.clone());
+        let mas = HomMas::new(&dynamics, 3);
+        let x0 = array![-1., 0., 0., 0., 2., 2.];
+        let q_mat = Array2::eye(2);
+        let r_mat = Array2::eye(1);
+        let k_mat = k_from_p(
+            &b_mat,
+            &r_mat,
+            &care_iterative(
+                &a_mat,
+                &b_mat,
+                &q_mat,
+                &r_mat,
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let c = coupling_gain(&laplacian).unwrap();
+        let pinning_gains = array![1., 0., 0.];
+        let times = Array1::linspace(0.0, 60.0, 301).into_iter().collect();
+        let r0 = array![-4., 0.];
+        let reference_states =
+            EulerIntegration::simulate(&times, &r0, &dynamics, &|_t, _x| array![0.]);
+        let reference = |t| {
+            reference_states.column(
+                times
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, &v)| if v == t { Some(i) } else { None })
+                    .unwrap(),
+            )
+        };
+        let control = homogeneous_leader_follower_synchronization(
+            &-laplacian,
+            c,
+            &k_mat,
+            &pinning_gains,
+            reference,
+        );
+        let states = EulerIntegration::simulate(&times, &x0, &mas, &control);
+
+        assert!(states
+            .slice(s![.., -1])
+            .abs_diff_eq(&array![-4., 0., -4., 0., -4., 0.], 1e-7))
     }
 }
