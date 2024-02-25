@@ -93,8 +93,7 @@ pub fn single_integrator_forced_consensus<
     reference: impl Fn(T) -> ArrayBase<S2, Ix1> + 'a,
     n_states: usize,
 ) -> impl Fn(T, &ArrayBase<S1, Ix1>) -> Array1<T> + 'a {
-    let pinning_gains = pinning_gains.clone();
-    let neg_l_plus_k = neg_laplacian - Array2::from_diag(&pinning_gains);
+    let neg_l_plus_k = neg_laplacian - Array2::from_diag(pinning_gains);
     let state_feedback = kron(&neg_l_plus_k, &Array2::eye(n_states));
     move |t: T, x: &ArrayBase<S1, Ix1>| -> Array1<T> {
         let r_vec = reference(t);
