@@ -80,8 +80,8 @@ pub fn compact_dynamics<T: LinalgScalar>(mas_dynamics: &dyn MasDynamics<T>, t: T
 /// ```
 #[derive(Debug)]
 pub struct LtiDynamics<T: LinalgScalar> {
-    a_mat: Array2<T>,
-    b_mat: Array2<T>,
+    pub a_mat: Array2<T>,
+    pub b_mat: Array2<T>,
 }
 
 impl<T: LinalgScalar> LtiDynamics<T> {

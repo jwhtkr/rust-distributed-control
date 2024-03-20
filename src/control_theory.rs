@@ -9,8 +9,6 @@ use crate::dynamics;
 ///
 /// Uses a similar method to the numpy implementation: see [numpy][numpy-rank]
 ///
-/// [numpy-rank]: https://numpy.org/doc/stable/reference/generated/numpy.linalg.matrix_rank.html
-///
 /// # Examples
 /// ```
 /// use ndarray::array;
@@ -20,8 +18,10 @@ use crate::dynamics;
 ///
 /// assert_eq!(rank(&mat, Default::default()).expect("Error in rank"), 2);
 /// ```
+///
+/// [numpy-rank]: https://numpy.org/doc/stable/reference/generated/numpy.linalg.matrix_rank.html
 pub fn rank<T: Lapack>(mat: &Array2<T>, eps: Option<f64>) -> Result<usize, LinalgError> {
-    let (_, singular_values, _) =  mat.svd(false, false)?;
+    let (_, singular_values, _) = mat.svd(false, false)?;
     let sv_max = singular_values
         .iter()
         .map(|&v| v.abs().re())
@@ -206,6 +206,31 @@ pub fn k_from_p<T: LinalgScalar + ndarray_linalg::Lapack>(
     Ok(Array2::inv(r_mat)?.dot(&b_mat.t()).dot(p_mat))
 }
 
+/// Determine the LQR solution feedback matrix for the given A, B, Q, and R.
+///
+/// Solves the continuous Algebraic Riccati Equation (CARE) for A, B, Q, and R
+/// for P, then constructs K as $K=R^{-1}B^\text{T}P$.
+///
+/// The functions [`care_iterative`] and [`k_from_p`] are passed the respective
+/// arguments without modification.
+pub fn lqr<
+    T: LinalgScalar + ndarray_linalg::Lapack + ndarray::ScalarOperand + std::cmp::PartialOrd,
+>(
+    a_mat: &Array2<T>,
+    b_mat: &Array2<T>,
+    q_mat: &Array2<T>,
+    r_mat: &Array2<T>,
+    dt: Option<T>,
+    tol: Option<T>,
+    iter_max: Option<usize>,
+) -> Result<Array2<T>, LinalgError> {
+    k_from_p(
+        b_mat,
+        r_mat,
+        &care_iterative(a_mat, b_mat, q_mat, r_mat, dt, tol, iter_max)?,
+    )
+}
+
 /// Determine the synchronization map of a leaderless homogeneous MAS.
 ///
 /// Computed as $(w_\ell^\text{T} \otimes e^{tA})x_0$ where $w_\ell$ is the
@@ -225,7 +250,8 @@ pub fn synchronization_map<T: LinalgScalar + Lapack + std::cmp::PartialOrd + Sca
         .map(|(_e, v)| v.map(|el| T::from_real(el.re())))
         .next()
         .unwrap();
-    left_null_eig_vec *= T::one() / (left_null_eig_vec.dot(&Array1::ones(left_null_eig_vec.raw_dim())));
+    left_null_eig_vec *=
+        T::one() / (left_null_eig_vec.dot(&Array1::ones(left_null_eig_vec.raw_dim())));
 
     (
         dynamics::LtiDynamics::new(a_mat.clone(), Array2::zeros((a_mat.nrows(), 1))),
