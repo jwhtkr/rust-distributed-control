@@ -1,6 +1,6 @@
 //! Define the various types of MAS dynamics.
 
-use ndarray::{s, Array1, Array2, LinalgScalar};
+use ndarray::{s, Array1, Array2, Axis, LinalgScalar};
 
 /// Continuous-time dynamics of the form $\dot{x} = f(t, x, u)$.
 /// I.e., fully non-linear and time-varying dynamics.
@@ -11,10 +11,14 @@ use ndarray::{s, Array1, Array2, LinalgScalar};
 pub trait Dynamics<T: LinalgScalar> {
     /// Calculate the dynamics, i.e., $\dot{x} = f(t, x, u(t, x))$
     fn dynamics(&self, t: T, x: &Array1<T>, u: &Array1<T>) -> Array1<T>;
+    /// Calculate the output, i.e., $y = g(t, x, u(t, x))$
+    fn output(&self, t: T, x: &Array1<T>, u: &Array1<T>) -> Array1<T>;
     /// Get the dimension of the state $x$.
     fn n_state(&self) -> usize;
     /// Get the dimension of the input $u$.
     fn n_input(&self) -> usize;
+    /// Get the dimension of the output $y$.
+    fn n_output(&self) -> usize;
 }
 
 /// Multi-agent system dynamics with possibly heterogeneous
@@ -31,38 +35,58 @@ pub trait MasDynamics<T: LinalgScalar>: Dynamics<T> {
 
     /// The number of agents in the multi-agent system.
     fn n_agents(&self) -> usize;
-
 }
 
 /// Provide a conversion from agent-wise to compact dynamics. I.e., the
 /// state and input vectors (`x` and `u`) are comprised of the state and
 /// input of each agent stacked/concatenated.
-pub fn compact_dynamics<T: LinalgScalar>(mas_dynamics: &dyn MasDynamics<T>, t: T, x: &Array1<T>, u: &Array1<T>) -> Array1<T> {
+pub fn compact_dynamics<T: LinalgScalar>(
+    mas_dynamics: &dyn MasDynamics<T>,
+    t: T,
+    x: &Array1<T>,
+    u: &Array1<T>,
+) -> Array1<T> {
     let all_dynamics: Vec<_> = (0..mas_dynamics.n_agents())
         .map(|i| mas_dynamics.mas_dynamics(i).unwrap())
         .collect();
-    let n_x_total = all_dynamics.iter().fold(0, |acc, &el| acc + el.n_state());
 
-    let mut x_next = Array1::zeros((n_x_total,));
-    let mut x_i_start = 0;
-    let mut u_i_start = 0;
-    for _dyn in all_dynamics.into_iter() {
-        let n_x_i = _dyn.n_state();
-        let n_u_i = _dyn.n_input();
-        let x_i_end = x_i_start + n_x_i;
-        let u_i_end = u_i_start + n_u_i;
+    let x_nexts: Vec<_> = all_dynamics
+        .iter()
+        .scan((0, 0), |(i_x, i_u), &d| {
+            let x_i = x.slice(s![*i_x..*i_x + d.n_state()]).to_owned();
+            let u_i = u.slice(s![*i_u..*i_u + d.n_input()]).to_owned();
+            *i_x += d.n_state();
+            *i_u += d.n_input();
+            Some(d.dynamics(t, &x_i, &u_i))
+        })
+        .collect();
+    let x_nexts_view: Vec<_> = x_nexts.iter().map(|v| v.view()).collect();
+    ndarray::concatenate(Axis(0), x_nexts_view.as_slice()).unwrap()
+}
 
-        let x_i = x.slice(s![x_i_start..x_i_end]).into_owned();
-        let u_i = u.slice(s![u_i_start..u_i_end]).into_owned();
+/// Provide a conversion from agent-wise to compact output.
+pub fn compact_output<T: LinalgScalar>(
+    mas_dynamics: &dyn MasDynamics<T>,
+    t: T,
+    x: &Array1<T>,
+    u: &Array1<T>,
+) -> Array1<T> {
+    let all_dyn: Vec<_> = (0..mas_dynamics.n_agents())
+        .map(|i| mas_dynamics.mas_dynamics(i).unwrap())
+        .collect();
 
-        x_next
-            .slice_mut(s![x_i_start..x_i_end])
-            .assign(&_dyn.dynamics(t, &x_i, &u_i));
-
-        x_i_start = x_i_end;
-        u_i_start = u_i_end;
-    }
-    x_next
+    let outputs: Vec<_> = all_dyn
+        .iter()
+        .scan((0, 0), |(i_x, i_u), &d| {
+            let x_i = x.slice(s![*i_x..*i_x + d.n_state()]).to_owned();
+            let u_i = u.slice(s![*i_u..*i_u + d.n_input()]).to_owned();
+            *i_x += d.n_state();
+            *i_u += d.n_input();
+            Some(d.output(t, &x_i, &u_i))
+        })
+        .collect();
+    let outputs_views: Vec<_> = outputs.iter().map(|v| v.view()).collect();
+    ndarray::concatenate(Axis(0), outputs_views.as_slice()).unwrap()
 }
 
 /// Implement linear, time-invariant (LTI) dynamics. I.e.,
@@ -82,12 +106,21 @@ pub fn compact_dynamics<T: LinalgScalar>(mas_dynamics: &dyn MasDynamics<T>, t: T
 pub struct LtiDynamics<T: LinalgScalar> {
     pub a_mat: Array2<T>,
     pub b_mat: Array2<T>,
+    pub c_mat: Array2<T>,
+    pub d_mat: Array2<T>,
 }
 
 impl<T: LinalgScalar> LtiDynamics<T> {
     /// Create an LTI system from an $A$ matrix (`a_mat`) and a $B$ matrix (`b_mat`)
     pub fn new(a_mat: Array2<T>, b_mat: Array2<T>) -> LtiDynamics<T> {
-        LtiDynamics { a_mat, b_mat }
+        let n_state = a_mat.ncols();
+        let n_input = b_mat.ncols();
+        LtiDynamics {
+            a_mat,
+            b_mat,
+            c_mat: Array2::zeros((0, n_state)),
+            d_mat: Array2::zeros((0, n_input)),
+        }
     }
 }
 
@@ -100,8 +133,16 @@ impl<T: LinalgScalar> Dynamics<T> for LtiDynamics<T> {
         self.a_mat.ncols()
     }
 
+    fn n_output(&self) -> usize {
+        self.c_mat.nrows()
+    }
+
     fn dynamics(&self, _t: T, x: &Array1<T>, u: &Array1<T>) -> Array1<T> {
         self.a_mat.dot(x) + self.b_mat.dot(u)
+    }
+
+    fn output(&self, _t: T, x: &Array1<T>, u: &Array1<T>) -> Array1<T> {
+        self.c_mat.dot(x) + self.d_mat.dot(u)
     }
 }
 

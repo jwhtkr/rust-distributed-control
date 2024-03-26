@@ -3,7 +3,7 @@
 
 use ndarray::LinalgScalar;
 
-use crate::dynamics::{compact_dynamics, Dynamics, MasDynamics};
+use crate::dynamics::{compact_dynamics, compact_output, Dynamics, MasDynamics};
 
 /// A homogenous MAS, i.e., the dynamics of each agent are identical.
 pub struct HomMas<'a, T: LinalgScalar> {
@@ -44,14 +44,31 @@ impl<'a, T: LinalgScalar> Dynamics<T> for HomMas<'a, T> {
         compact_dynamics(self, t, x, u)
     }
 
+    fn output(
+        &self,
+        t: T,
+        x: &ndarray::prelude::Array1<T>,
+        u: &ndarray::prelude::Array1<T>,
+    ) -> ndarray::prelude::Array1<T> {
+        compact_output(self, t, x, u)
+    }
+
     fn n_input(&self) -> usize {
         (0..self.n_agents())
-            .map(|i| self.mas_dynamics(i).unwrap().n_input()).sum()
+            .map(|i| self.mas_dynamics(i).unwrap().n_input())
+            .sum()
     }
 
     fn n_state(&self) -> usize {
         (0..self.n_agents())
-            .map(|i| self.mas_dynamics(i).unwrap().n_state()).sum()
+            .map(|i| self.mas_dynamics(i).unwrap().n_state())
+            .sum()
+    }
+
+    fn n_output(&self) -> usize {
+        (0..self.n_agents())
+            .map(|i| self.mas_dynamics(i).unwrap().n_output())
+            .sum()
     }
 }
 
