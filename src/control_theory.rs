@@ -218,12 +218,28 @@ pub fn lqr<
 >(
     a_mat: &Array2<T>,
     b_mat: &Array2<T>,
-    q_mat: &Array2<T>,
-    r_mat: &Array2<T>,
+    q_mat: Option<&Array2<T>>,
+    r_mat: Option<&Array2<T>>,
     dt: Option<T>,
     tol: Option<T>,
     iter_max: Option<usize>,
 ) -> Result<Array2<T>, LinalgError> {
+    let _q_mat;
+    let q_mat = match q_mat {
+        Some(q_mat) => q_mat,
+        None => {
+            _q_mat = Array2::eye(a_mat.ncols());
+            &_q_mat
+        }
+    };
+    let _r_mat;
+    let r_mat = match r_mat {
+        Some(r_mat) => r_mat,
+        None => {
+            _r_mat = Array2::eye(b_mat.ncols());
+            &_r_mat
+        }
+    };
     k_from_p(
         b_mat,
         r_mat,

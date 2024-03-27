@@ -223,26 +223,34 @@ pub fn solve_lme<T: LinalgScalar + Lapack, S: Data<Elem = T>>(
 /// This control law solves the LORP when: $K_1$ is selected such that
 /// $A - B K_1$ is Hurwitz, and $K_2 = U - K_1 X$ with $X,U$ the solution to the
 /// corresponding regulator equations ([`RegulatorEquations`]).
-pub fn static_state_feedback<T>(lorp_dyn: &LorpDynamics<T>) -> impl Fn(T, &Array1<T>) -> Array1<T>
+pub fn static_state_feedback<T>(
+    lorp_dyn: &LorpDynamics<T>,
+    q_mat: Option<&Array2<T>>,
+    r_mat: Option<&Array2<T>>,
+) -> impl Fn(T, &Array1<T>) -> Array1<T>
 where
     T: LinalgScalar + Lapack + ScalarOperand + std::cmp::PartialOrd,
 {
-    let k_mat = static_state_feedback_k(lorp_dyn);
+    let k_mat = static_state_feedback_k(lorp_dyn, q_mat, r_mat);
 
     move |_t, x| k_mat.dot(x)
 }
 
-fn static_state_feedback_k<T>(lorp_dyn: &LorpDynamics<T>) -> Array2<T>
+fn static_state_feedback_k<T>(
+    lorp_dyn: &LorpDynamics<T>,
+    q_mat: Option<&Array2<T>>,
+    r_mat: Option<&Array2<T>>,
+) -> Array2<T>
 where
     T: LinalgScalar + Lapack + ScalarOperand + std::cmp::PartialOrd,
 {
     let reg_eqs = RegulatorEquations::new(lorp_dyn);
 
-    let k1_mat = lqr(
+    let k1_mat = -lqr(
         &lorp_dyn.a_mat,
         &lorp_dyn.b_mat,
-        &Array2::eye(lorp_dyn.a_mat.ncols()),
-        &Array2::eye(lorp_dyn.b_mat.ncols()),
+        q_mat,
+        r_mat,
         Default::default(),
         Default::default(),
         Default::default(),
@@ -281,16 +289,21 @@ where
 /// Note that because the controller itself has state, this function creates new
 /// dynamics that augment the state with the controller state/dynamics in
 /// addition to creating the control law.
+#[allow(clippy::too_many_arguments)]
 pub fn dynamic_measurement_output_feedback<T>(
     lorp_dyn: &LorpDynamics<T>,
     cm_mat: &Array2<T>,
     dm_mat: &Array2<T>,
     fm_mat: &Array2<T>,
+    q_mat_k: Option<&Array2<T>>,
+    r_mat_k: Option<&Array2<T>>,
+    q_mat_g: Option<&Array2<T>>,
+    r_mat_g: Option<&Array2<T>>,
 ) -> (LtiDynamics<T>, impl Fn(T, &Array1<T>) -> Array1<T>)
 where
     T: LinalgScalar + Lapack + ScalarOperand + std::cmp::PartialOrd,
 {
-    let k_mat = static_state_feedback_k(lorp_dyn);
+    let k_mat = static_state_feedback_k(lorp_dyn, q_mat_k, r_mat_k);
     let a_bar = concatenate![
         Axis(0),
         concatenate![Axis(1), lorp_dyn.a_mat, lorp_dyn.e_mat],
@@ -310,8 +323,8 @@ where
     let g2_mat = lqr(
         &a_bar.t().to_owned(),
         &c_bar.t().to_owned(),
-        &Array2::eye(a_bar.ncols()),
-        &Array2::eye(c_bar.nrows()),
+        q_mat_g,
+        r_mat_g,
         Default::default(),
         Default::default(),
         Default::default(),
@@ -358,7 +371,7 @@ where
             c_mat: c_tilde,
             d_mat: d_tilde,
         },
-        move |_t, x| k_mat.dot(x),
+        move |_t, x| k_mat.dot(&x.slice(s![-(k_mat.ncols() as i32)..])),
     )
 }
 
@@ -467,19 +480,19 @@ mod tests {
 
         let lorp = LorpDynamics::new(a_mat, b_mat, c_mat, d_mat, e_mat, f_mat, s_mat);
 
-        let u = static_state_feedback(&lorp);
+        let u = static_state_feedback(&lorp, None, None);
 
         assert!(
-            u(0., &eye4.slice(s![.., 0]).to_owned()).abs_diff_eq(&array![0.804473968919774], 1e-7)
+            u(0., &eye4.slice(s![.., 0]).to_owned()).abs_diff_eq(&array![-0.804473968919774], 1e-7)
         );
         assert!(
-            u(0., &eye4.slice(s![.., 1]).to_owned()).abs_diff_eq(&array![-1.109782934927153], 1e-8)
+            u(0., &eye4.slice(s![.., 1]).to_owned()).abs_diff_eq(&array![1.109782934927153], 1e-8)
         );
         assert!(
-            u(0., &eye4.slice(s![.., 2]).to_owned()).abs_diff_eq(&array![-1.085526859977024], 1e-8)
+            u(0., &eye4.slice(s![.., 2]).to_owned()).abs_diff_eq(&array![1.085526859977024], 1e-8)
         );
         assert!(
-            u(0., &eye4.slice(s![.., 3]).to_owned()).abs_diff_eq(&array![-0.696074102023046], 1e-7)
+            u(0., &eye4.slice(s![.., 3]).to_owned()).abs_diff_eq(&array![1.013534419483364], 1e-7)
         );
     }
 
@@ -505,8 +518,9 @@ mod tests {
 
         let lorp_dyn = LorpDynamics::new(a_mat, b_mat, c_mat, d_mat, e_mat, f_mat, s_mat);
 
-        let (feedback_dyn, feedback_ctrl) =
-            dynamic_measurement_output_feedback(&lorp_dyn, &cm_mat, &dm_mat, &fm_mat);
+        let (feedback_dyn, feedback_ctrl) = dynamic_measurement_output_feedback(
+            &lorp_dyn, &cm_mat, &dm_mat, &fm_mat, None, None, None, None,
+        );
 
         assert!(feedback_dyn.a_mat.abs_diff_eq(
             &array![
@@ -563,12 +577,12 @@ mod tests {
                     0.,
                     0.,
                     0.,
-                    -1.491557332345385,
-                    -0.016691440433567,
-                    -0.065307732096870,
-                    -0.389221909034889,
-                    -0.115740740740740,
-                    -0.648703181724815
+                    -2.002405999691712,
+                    0.016691440433567,
+                    0.351358934569796,
+                    0.389221909034889,
+                    0.115740740740740,
+                    0.648703181724815
                 ],
                 [
                     -0.027632790508885,
@@ -591,12 +605,12 @@ mod tests {
                     0.,
                     0.,
                     0.,
-                    -1.120585784324283,
-                    0.083457202167834,
-                    0.011660104864107,
-                    1.946109545174446,
-                    5.578703703703703,
-                    3.243515908624077
+                    1.433657552407349,
+                    -0.083457202167834,
+                    -2.071673228469225,
+                    -1.946109545174446,
+                    4.421296296296296,
+                    -3.243515908624077
                 ],
                 [
                     -1.162189394067212,
@@ -652,17 +666,19 @@ mod tests {
         ));
         assert!(feedback_dyn.d_mat.abs_diff_eq(&array![[0.]], 1e-8));
 
-        let eye6 = Array2::eye(6);
-        assert!(feedback_ctrl(0., &eye6.slice(s![0, ..]).to_owned())
-            .abs_diff_eq(&array![-1.226036801631183], 1e-6));
-        assert!(feedback_ctrl(0., &eye6.slice(s![1, ..]).to_owned())
-            .abs_diff_eq(&array![0.080118914081120], 1e-7));
-        assert!(feedback_ctrl(0., &eye6.slice(s![2, ..]).to_owned()).abs_diff_eq(&array![1.], 1e-8));
-        assert!(feedback_ctrl(0., &eye6.slice(s![3, ..]).to_owned())
-            .abs_diff_eq(&array![1.868265163367468], 1e-7));
-        assert!(feedback_ctrl(0., &eye6.slice(s![4, ..]).to_owned())
-            .abs_diff_eq(&array![5.555555555555554], 1e-8));
-        assert!(feedback_ctrl(0., &eye6.slice(s![5, ..]).to_owned())
-            .abs_diff_eq(&array![3.113775272279113], 1e-7));
+        let eye12 = Array2::eye(12);
+        assert!(feedback_ctrl(0., &eye12.slice(s![6, ..]).to_owned())
+            .abs_diff_eq(&array![1.226036801631183], 1e-6));
+        assert!(feedback_ctrl(0., &eye12.slice(s![7, ..]).to_owned())
+            .abs_diff_eq(&array![-0.080118914081120], 1e-7));
+        assert!(
+            feedback_ctrl(0., &eye12.slice(s![8, ..]).to_owned()).abs_diff_eq(&array![-1.], 1e-8)
+        );
+        assert!(feedback_ctrl(0., &eye12.slice(s![9, ..]).to_owned())
+            .abs_diff_eq(&array![-1.868265163367468], 1e-7));
+        assert!(feedback_ctrl(0., &eye12.slice(s![10, ..]).to_owned())
+            .abs_diff_eq(&array![4.444444444444444], 1e-8));
+        assert!(feedback_ctrl(0., &eye12.slice(s![11, ..]).to_owned())
+            .abs_diff_eq(&array![-3.113775272279113], 1e-7));
     }
 }
