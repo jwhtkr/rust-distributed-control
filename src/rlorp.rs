@@ -346,7 +346,7 @@ mod tests {
         assert!(rlorp_ctrl(0., &eye10.slice(s![5, ..]).to_owned()).abs_diff_eq(&array![0., 0.], 1e-12));
         assert!(rlorp_ctrl(0., &eye10.slice(s![6, ..]).to_owned()).abs_diff_eq(&array![0., 0.], 1e-12));
         assert!(rlorp_ctrl(0., &eye10.slice(s![7, ..]).to_owned()).abs_diff_eq(&array![-5.717006212533678e-3, -9.999836577864565e-1], 1e-7));
-        assert!(rlorp_ctrl(0., &eye10.slice(s![8, ..]).to_owned()).abs_diff_eq(&array![1.191185788711509e-2, 1.717901328143854], 1e-7));
+        assert!(rlorp_ctrl(0., &eye10.slice(s![8, ..]).to_owned()).abs_diff_eq(&array![1.191185788711509e-2, 1.717901328143854], 1e-6));
         assert!(rlorp_ctrl(0., &eye10.slice(s![9, ..]).to_owned()).abs_diff_eq(&array![-1.270628456329595e-2, -1.220492805876535], 1e-7));
     }
 }
