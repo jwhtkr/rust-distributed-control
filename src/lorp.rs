@@ -1,4 +1,4 @@
-//! Linear Output Regulation Problem solutions/functionality.
+//! Linear Output Regulation Problem (LORP) solutions/functionality.
 
 use ndarray::{
     concatenate, linalg::kron, s, Array1, Array2, ArrayBase, Axis, Data, Ix2, LinalgScalar,

@@ -172,6 +172,7 @@ where
     let b_transpose = b_mat.t();
     let r_inverse = Array2::inv(r_mat)?;
 
+    // TODO: Convert this to use one of the better integrators. Maybe RK45.
     for _i in 0..iter_max {
         let p_next = &p_mat
             + (p_mat.dot(a_mat) + a_transpose.dot(&p_mat)
