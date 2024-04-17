@@ -10,6 +10,7 @@ use crate::{control_theory::lqr, dynamics::Dynamics, lorp::LorpDynamics, LtiDyna
 /// $$ \dot{x} = (A + \Delta A) x + (B + \Delta B) u + (E + \Delta E) v $$
 /// $$ e = (C + \Delta C) x + (D + \Delta D) u + (F + \Delta F) v $$
 /// $$ \dot{v} = S v
+#[derive(Debug, Clone)]
 pub struct RlorpDynamics<T: LinalgScalar> {
     pub lorp_dynamics: LorpDynamics<T>,
     pub delta_a: Array2<T>,
@@ -131,7 +132,7 @@ fn block_diag<T: LinalgScalar>(blocks: &[Array2<T>]) -> Array2<T> {
 }
 
 /// Create a p-copy internal model from the given minimum polynomial
-fn p_copy_internal_model<T: LinalgScalar + Lapack>(
+pub fn p_copy_internal_model<T: LinalgScalar + Lapack>(
     minimal_polynomial: &[T],
     n_p: usize,
 ) -> (Array2<T>, Array2<T>) {
@@ -182,50 +183,25 @@ pub fn dynamic_state_feedback_controller_rlorp<
     let (g1_mat, g2_mat) =
         p_copy_internal_model(min_poly_s, rlorp_dynamics.lorp_dynamics.c_mat.nrows());
 
-    let a_bar = concatenate![
-        Axis(0),
-        concatenate![
-            Axis(1),
-            rlorp_dynamics.lorp_dynamics.a_mat,
-            Array2::zeros((rlorp_dynamics.lorp_dynamics.a_mat.nrows(), g1_mat.ncols()))
-        ],
-        concatenate![
-            Axis(1),
-            g2_mat.dot(&rlorp_dynamics.lorp_dynamics.c_mat),
-            g1_mat
-        ]
-    ];
-    let b_bar = concatenate![
-        Axis(0),
-        rlorp_dynamics.lorp_dynamics.b_mat,
-        g2_mat.dot(&rlorp_dynamics.lorp_dynamics.d_mat)
-    ];
-    let k_mat = -lqr(
-        &a_bar,
-        &b_bar,
-        q_mat,
-        r_mat,
-        Default::default(),
-        Default::default(),
-        Default::default(),
-    )
-    .unwrap();
-
-
+    let k_mat =
+        dynamic_state_feedback_controller_gains(rlorp_dynamics, &g1_mat, &g2_mat, q_mat, r_mat);
     let k_mat_aug = concatenate![
         Axis(1),
         k_mat.slice(s![.., 0..rlorp_dynamics.lorp_dynamics.a_mat.ncols()]),
         Array2::zeros((k_mat.nrows(), rlorp_dynamics.lorp_dynamics.s_mat.ncols())),
         k_mat.slice(s![.., rlorp_dynamics.lorp_dynamics.a_mat.ncols()..])
     ];
-    println!("{k_mat_aug}");
     (
         augmented_system_dynamic_state_feedback(rlorp_dynamics, &g1_mat, &g2_mat),
         move |_t, x| k_mat_aug.dot(x),
     )
 }
 
-pub fn augmented_system_dynamic_state_feedback<T: LinalgScalar>(rlorp_dynamics: &RlorpDynamics<T>, g1_mat: &Array2<T>, g2_mat: &Array2<T>) -> LtiDynamics<T> {
+pub fn augmented_system_dynamic_state_feedback<T: LinalgScalar>(
+    rlorp_dynamics: &RlorpDynamics<T>,
+    g1_mat: &Array2<T>,
+    g2_mat: &Array2<T>,
+) -> LtiDynamics<T> {
     let a_aug = concatenate![
         Axis(0),
         concatenate![
@@ -254,7 +230,51 @@ pub fn augmented_system_dynamic_state_feedback<T: LinalgScalar>(rlorp_dynamics: 
         Array2::zeros((rlorp_dynamics.c_tilde().nrows(), g1_mat.ncols()))
     ];
     let d_aug = rlorp_dynamics.d_tilde().clone();
-    LtiDynamics {a_mat: a_aug, b_mat: b_aug, c_mat: c_aug, d_mat: d_aug}
+    LtiDynamics {
+        a_mat: a_aug,
+        b_mat: b_aug,
+        c_mat: c_aug,
+        d_mat: d_aug,
+    }
+}
+
+pub fn dynamic_state_feedback_controller_gains<
+    T: LinalgScalar + Lapack + ndarray::ScalarOperand + std::cmp::PartialOrd,
+>(
+    rlorp_dynamics: &RlorpDynamics<T>,
+    g1_mat: &Array2<T>,
+    g2_mat: &Array2<T>,
+    q_mat: Option<&Array2<T>>,
+    r_mat: Option<&Array2<T>>,
+) -> Array2<T> {
+    let a_bar = concatenate![
+        Axis(0),
+        concatenate![
+            Axis(1),
+            rlorp_dynamics.lorp_dynamics.a_mat,
+            Array2::zeros((rlorp_dynamics.lorp_dynamics.a_mat.nrows(), g1_mat.ncols()))
+        ],
+        concatenate![
+            Axis(1),
+            g2_mat.dot(&rlorp_dynamics.lorp_dynamics.c_mat),
+            *g1_mat
+        ]
+    ];
+    let b_bar = concatenate![
+        Axis(0),
+        rlorp_dynamics.lorp_dynamics.b_mat,
+        g2_mat.dot(&rlorp_dynamics.lorp_dynamics.d_mat)
+    ];
+    -lqr(
+        &a_bar,
+        &b_bar,
+        q_mat,
+        r_mat,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+    )
+    .unwrap()
 }
 
 #[cfg(test)]
@@ -334,19 +354,34 @@ mod tests {
             ],
             1e-12
         ));
-        assert!(rlorp_dyn.c_mat.abs_diff_eq(&array![[1., 0., 0., 0., -1., 0., 0., 0., 0., 0.]], 1e-12));
+        assert!(rlorp_dyn
+            .c_mat
+            .abs_diff_eq(&array![[1., 0., 0., 0., -1., 0., 0., 0., 0., 0.]], 1e-12));
         assert!(rlorp_dyn.d_mat.abs_diff_eq(&array![[0., 0.]], 1e-12));
 
         let eye10 = Array2::eye(10);
-        assert!(rlorp_ctrl(0., &eye10.slice(s![0, ..]).to_owned()).abs_diff_eq(&array![-3.513697633313342e-2, -6.335195984931541], 1e-6));
-        assert!(rlorp_ctrl(0., &eye10.slice(s![1, ..]).to_owned()).abs_diff_eq(&array![-1.95060633838762e-3, 2.541285622352293e-1], 1e-7));
-        assert!(rlorp_ctrl(0., &eye10.slice(s![2, ..]).to_owned()).abs_diff_eq(&array![2.646935642526326e-1, 9.260870385043025e1], 1e-5));
-        assert!(rlorp_ctrl(0., &eye10.slice(s![3, ..]).to_owned()).abs_diff_eq(&array![4.017889034646774e-3, 6.243495025478761], 1e-7));
-        assert!(rlorp_ctrl(0., &eye10.slice(s![4, ..]).to_owned()).abs_diff_eq(&array![0., 0.], 1e-12));
-        assert!(rlorp_ctrl(0., &eye10.slice(s![5, ..]).to_owned()).abs_diff_eq(&array![0., 0.], 1e-12));
-        assert!(rlorp_ctrl(0., &eye10.slice(s![6, ..]).to_owned()).abs_diff_eq(&array![0., 0.], 1e-12));
-        assert!(rlorp_ctrl(0., &eye10.slice(s![7, ..]).to_owned()).abs_diff_eq(&array![-5.717006212533678e-3, -9.999836577864565e-1], 1e-7));
-        assert!(rlorp_ctrl(0., &eye10.slice(s![8, ..]).to_owned()).abs_diff_eq(&array![1.191185788711509e-2, 1.717901328143854], 1e-6));
-        assert!(rlorp_ctrl(0., &eye10.slice(s![9, ..]).to_owned()).abs_diff_eq(&array![-1.270628456329595e-2, -1.220492805876535], 1e-7));
+        assert!(rlorp_ctrl(0., &eye10.slice(s![0, ..]).to_owned())
+            .abs_diff_eq(&array![-3.513697633313342e-2, -6.335195984931541], 1e-6));
+        assert!(rlorp_ctrl(0., &eye10.slice(s![1, ..]).to_owned())
+            .abs_diff_eq(&array![-1.95060633838762e-3, 2.541285622352293e-1], 1e-7));
+        assert!(rlorp_ctrl(0., &eye10.slice(s![2, ..]).to_owned())
+            .abs_diff_eq(&array![2.646935642526326e-1, 9.260870385043025e1], 1e-5));
+        assert!(rlorp_ctrl(0., &eye10.slice(s![3, ..]).to_owned())
+            .abs_diff_eq(&array![4.017889034646774e-3, 6.243495025478761], 1e-7));
+        assert!(
+            rlorp_ctrl(0., &eye10.slice(s![4, ..]).to_owned()).abs_diff_eq(&array![0., 0.], 1e-12)
+        );
+        assert!(
+            rlorp_ctrl(0., &eye10.slice(s![5, ..]).to_owned()).abs_diff_eq(&array![0., 0.], 1e-12)
+        );
+        assert!(
+            rlorp_ctrl(0., &eye10.slice(s![6, ..]).to_owned()).abs_diff_eq(&array![0., 0.], 1e-12)
+        );
+        assert!(rlorp_ctrl(0., &eye10.slice(s![7, ..]).to_owned())
+            .abs_diff_eq(&array![-5.717006212533678e-3, -9.999836577864565e-1], 1e-7));
+        assert!(rlorp_ctrl(0., &eye10.slice(s![8, ..]).to_owned())
+            .abs_diff_eq(&array![1.191185788711509e-2, 1.717901328143854], 1e-6));
+        assert!(rlorp_ctrl(0., &eye10.slice(s![9, ..]).to_owned())
+            .abs_diff_eq(&array![-1.270628456329595e-2, -1.220492805876535], 1e-7));
     }
 }

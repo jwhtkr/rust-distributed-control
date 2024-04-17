@@ -13,6 +13,7 @@ use crate::{control_theory::lqr, dynamics::Dynamics, LtiDynamics};
 /// $$ \dot{x} = A x + B u + E v $$
 /// $$ e = C x + D u + F v $$
 /// $$ \dot{v} = S v
+#[derive(Debug, Clone)]
 pub struct LorpDynamics<T: LinalgScalar> {
     pub a_mat: Array2<T>,
     pub b_mat: Array2<T>,

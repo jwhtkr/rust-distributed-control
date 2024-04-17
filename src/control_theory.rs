@@ -102,6 +102,16 @@ pub fn controllability_matrix<T: LinalgScalar>(a_mat: &Array2<T>, b_mat: &Array2
     controllability
 }
 
+pub fn is_hurwitz<T: LinalgScalar + Lapack>(mat: &Array2<T>) -> Result<bool, LinalgError> {
+    let (eig_vals, _eig_vecs) = mat.eig()?;
+    for eig_val in eig_vals {
+        if eig_val.re() >= T::zero().re() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// Solve the Continuous Algebraic Riccati Equation (CARE) iteratively.
 ///
 /// With $Q\succcurlyeq 0$ and $R\succcurlyeq 0$ the CARE is

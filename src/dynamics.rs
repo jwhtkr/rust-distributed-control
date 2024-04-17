@@ -102,7 +102,7 @@ pub fn compact_output<T: LinalgScalar>(
 /// assert_eq!(dynamics.n_input(), 1);
 /// assert_eq!(dynamics.n_state(), 2);
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LtiDynamics<T: LinalgScalar> {
     pub a_mat: Array2<T>,
     pub b_mat: Array2<T>,
